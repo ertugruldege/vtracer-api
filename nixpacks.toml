@@ -1,20 +1,3 @@
-[phases.setup]
-nixpkgs = "https://github.com/NixOS/nixpkgs/archive/a683adc19ff5228af548c6539dbc3440509bfed3.tar.gz"
-nixPkgs = [
-  "rustc",
-  "cargo",
-  "pkg-config",
-  "openssl",
-  "gcc",
-  "gnumake",
-  "zlib",
-  "libpng",
-  "libjpeg",
-  "freetype",
-  "libtiff",
-  "libwebp"
-]
-
 [phases.build]
 cmds = [
   "cargo build --release",
