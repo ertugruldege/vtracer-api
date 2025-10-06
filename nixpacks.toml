@@ -1,26 +1,20 @@
 [phases.setup]
-nixpkgs = [
-  "rust-bin.stable.latest.default", 
-  "binutils",
-  "gcc",
-  "glibc",
-  "glibc.dev"
+nixPkgs = [
+  "python312",
+  "python312Packages.pip",
+  "python312Packages.setuptools",
+  "python312Packages.wheel",
+  "python312Packages.virtualenv"
 ]
 
 [phases.build]
 cmds = [
-  "git clone --depth 1 https://github.com/visioncortex/vtracer.git /tmp/vtracer",
-  "cargo build --release --manifest-path /tmp/vtracer/Cargo.toml",
-  "cargo install --path /tmp/vtracer/cmdapp",
-  "mkdir -p /app/bin",
-  "cp /root/.cargo/bin/vtracer /app/bin/vtracer",
-  "chmod +x /app/bin/vtracer",
-  "rm -rf /tmp/vtracer"
+  "pip install -r requirements.txt"
 ]
 
 [start]
-cmd = "/app/bin/vtracer"
+cmd = "python main.py"
 
 [env]
-RUST_LOG = "info,tower_http=info"
 PORT = "8080"
+PYTHONUNBUFFERED = "1"

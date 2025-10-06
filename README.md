@@ -1,18 +1,29 @@
 # vtracer-api
 
-An Axum-based API service with real vtracer CLI integration. Converts raster images (PNG, JPG, JPEG, WebP, TIFF, BMP, GIF) into vector SVG.
+A FastAPI-based API service with VTracer integration. Converts raster images (PNG, JPG, JPEG, WebP, TIFF, BMP, GIF) into vector SVG.
 
 ## Endpoints
 
+-   `GET /` — API information
 -   `GET /api/health` — health check
--   `POST /api/convert` — multipart form-data: `image` (file), `options` (JSON string)
+-   `POST /api/convert` — convert image to SVG
+-   `GET /api/models` — available models/presets
 
 ## Supported Formats
 
 -   PNG, JPG, JPEG, WebP, TIFF, BMP, GIF
 -   Maximum file size: 40MB
 
-## Options Parameters
+## Convert Endpoint
+
+**POST** `/api/convert`
+
+**Form Data:**
+
+-   `image`: Image file (required)
+-   `options`: JSON string with conversion options (optional)
+
+**Options Parameters:**
 
 ```json
 {
@@ -36,21 +47,26 @@ An Axum-based API service with real vtracer CLI integration. Converts raster ima
 # Health check
 curl http://localhost:8080/api/health
 
-# Convert raster to SVG
+# Convert image to SVG
 curl -X POST http://localhost:8080/api/convert \
   -F image=@/path/to/image.jpg \
   -F 'options={"color_mode":"color","mode":"spline","corner_threshold":45}'
+
+# Get available models
+curl http://localhost:8080/api/models
 ```
 
 ## Run Locally
 
 ```bash
-# Development
-cargo run
+# Install dependencies
+pip install -r requirements.txt
 
-# Production build
-cargo build --release
-./target/release/vtracer-api
+# Run development server
+python main.py
+
+# Or with uvicorn directly
+uvicorn main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
 ## Nixpacks Deployment
@@ -60,12 +76,13 @@ cargo build --release
 ### Environment Variables
 
 -   `PORT`: Server port (default: 8080)
--   `RUST_LOG`: Log level (default: info)
+-   `PYTHONUNBUFFERED`: Set to "1" for proper logging
 
 ## Technical Notes
 
--   Axum web framework (Rust)
--   Async/await
--   Temporary file handling with automatic cleanup
+-   FastAPI web framework (Python)
+-   VTracer Python library integration
+-   Automatic file type validation
 -   Comprehensive error handling
--   Invokes the `vtracer` CLI with all supported parameters
+-   CORS enabled for web integration
+-   Async/await support
