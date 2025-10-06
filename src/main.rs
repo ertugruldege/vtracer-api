@@ -11,7 +11,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use tracing_subscriber::{fmt, EnvFilter};
 use uuid::Uuid;
 
@@ -78,7 +78,8 @@ async fn main() -> anyhow::Result<()> {
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("listening on {}", addr);
-    axum::Server::bind(&addr).serve(app.into_make_service()).await?;
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }
 
@@ -100,11 +101,12 @@ async fn convert(State(_state): State<AppState>, mut multipart: Multipart) -> im
                 }
             }
         } else if name == "image" {
+            let filename = field.file_name().map(|f| f.to_string());
             match field.bytes().await {
                 Ok(b) => {
                     image_bytes = Some(b.to_vec());
-                    if let Some(filename) = field.file_name() {
-                        file_extension = Path::new(filename)
+                    if let Some(filename) = filename {
+                        file_extension = Path::new(&filename)
                             .extension()
                             .and_then(|ext| ext.to_str())
                             .map(|s| s.to_lowercase());
