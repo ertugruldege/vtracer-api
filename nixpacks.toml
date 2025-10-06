@@ -10,6 +10,7 @@ nixpkgs = [
 [phases.build]
 cmds = [
   "git clone --depth 1 https://github.com/visioncortex/vtracer.git /tmp/vtracer",
+  "rustup target add x86_64-unknown-linux-gnu",
   "cd /tmp/vtracer && cargo build --release --target x86_64-unknown-linux-gnu",
   "cd /tmp/vtracer && cargo install --path cmdapp --target x86_64-unknown-linux-gnu",
   "cp /root/.cargo/bin/vtracer /usr/local/bin/vtracer",
