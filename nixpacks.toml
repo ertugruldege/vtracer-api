@@ -13,14 +13,13 @@ cmds = [
   "cargo build --release --manifest-path /tmp/vtracer/Cargo.toml",
   "cargo install --path /tmp/vtracer/cmdapp",
   "mkdir -p /app/bin",
-  "cp /tmp/vtracer/target/release/vtracer-api /app/bin/vtracer-api",
   "cp $(cargo bin-dir)/vtracer /app/bin/vtracer",
-  "chmod +x /app/bin/vtracer-api /app/bin/vtracer",
+  "chmod +x /app/bin/vtracer",
   "rm -rf /tmp/vtracer"
 ]
 
 [start]
-cmd = "/app/bin/vtracer-api"
+cmd = "/app/bin/vtracer"
 runImage = "ghcr.io/railwayapp/nixpacks:ubuntu-1745885067"
 
 [env]
