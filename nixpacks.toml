@@ -5,6 +5,7 @@ cmds = [
   "cd /tmp/vtracer && cargo install --path cmdapp",
   "cp /root/.cargo/bin/vtracer /usr/local/bin/vtracer",
   "chmod +x /usr/local/bin/vtracer",
+  "mkdir -p /app/bin",
   "cp target/release/vtracer-api /app/bin/vtracer-api",
   "chmod +x /app/bin/vtracer-api",
   "rm -rf /tmp/vtracer"
