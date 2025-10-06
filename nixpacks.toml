@@ -20,7 +20,6 @@ cmds = [
 
 [start]
 cmd = "/app/bin/vtracer"
-runImage = "ghcr.io/railwayapp/nixpacks:ubuntu-1745885067"
 
 [env]
 RUST_LOG = "info,tower_http=info"
