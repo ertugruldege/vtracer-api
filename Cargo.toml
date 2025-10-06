@@ -1,0 +1,25 @@
+[package]
+name = "vtracer-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["json", "multipart"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.39", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+anyhow = "1.0"
+bytes = "1.6"
+thiserror = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+tempfile = "3.8"
+tokio::fs = "1.39"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
