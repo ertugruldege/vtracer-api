@@ -79,19 +79,16 @@ async def convert_image(
                 vtracer_options = {
                     "colormode": options_dict.get("color_mode", "color"),
                     "hierarchical": options_dict.get("hierarchical", "stacked"),
-                    "filter_speckle": options_dict.get("filter_speckle", 2),
-                    "corner_threshold": options_dict.get("corner_threshold", 60),
-                    "color_precision": options_dict.get("color_precision", 8),
-                    "gradient_step": options_dict.get("gradient_step", 0),
                     "mode": options_dict.get("mode", "spline"),
-                    "path_precision": options_dict.get("path_precision", 1),
-                    "segment_length": options_dict.get("segment_length", 8),
-                    "splice_threshold": options_dict.get("splice_threshold", 2.5),
+                    "filter_speckle": options_dict.get("filter_speckle", 4),
+                    "color_precision": options_dict.get("color_precision", 6),
+                    "layer_difference": options_dict.get("layer_difference", 16),
+                    "corner_threshold": options_dict.get("corner_threshold", 60),
+                    "length_threshold": options_dict.get("segment_length", 4.0),
+                    "max_iterations": options_dict.get("max_iterations", 10),
+                    "splice_threshold": options_dict.get("splice_threshold", 45),
+                    "path_precision": options_dict.get("path_precision", 3),
                 }
-                
-                # Add preset if provided
-                if "preset" in options_dict and options_dict["preset"]:
-                    vtracer_options["preset"] = options_dict["preset"]
                     
             except json.JSONDecodeError:
                 logger.warning("Invalid JSON in options parameter")
@@ -124,9 +121,9 @@ async def get_models():
     """Get available vtracer models/presets"""
     return {
         "presets": ["bw", "poster", "photo"],
-        "color_modes": ["color", "bw"],
+        "color_modes": ["color", "binary"],
         "hierarchical_modes": ["stacked", "cutout"],
-        "curve_modes": ["pixel", "polygon", "spline"]
+        "curve_modes": ["spline", "polygon", "none"]
     }
 
 if __name__ == "__main__":
