@@ -13,7 +13,7 @@ cmds = [
   "cargo build --release --manifest-path /tmp/vtracer/Cargo.toml",
   "cargo install --path /tmp/vtracer/cmdapp",
   "mkdir -p /app/bin",
-  "cp $(cargo bin-dir)/vtracer /app/bin/vtracer",
+  "cp /root/.cargo/bin/vtracer /app/bin/vtracer",
   "chmod +x /app/bin/vtracer",
   "rm -rf /tmp/vtracer"
 ]
