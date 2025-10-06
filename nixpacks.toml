@@ -5,11 +5,13 @@ cmds = [
   "cd /tmp/vtracer && cargo install --path cmdapp",
   "cp /root/.cargo/bin/vtracer /usr/local/bin/vtracer",
   "chmod +x /usr/local/bin/vtracer",
+  "cp target/release/vtracer-api /app/bin/vtracer-api",
+  "chmod +x /app/bin/vtracer-api",
   "rm -rf /tmp/vtracer"
 ]
 
 [start]
-cmd = "./target/release/vtracer-api"
+cmd = "/app/bin/vtracer-api"
 
 [env]
 RUST_LOG = "info,tower_http=info"
