@@ -6,15 +6,28 @@ import json
 import logging
 from typing import Optional
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import traceback
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Thread pool for vtracer conversion (CPU-bound operation)
+executor = ThreadPoolExecutor(max_workers=4)
+
+# Configuration
+MAX_FILE_SIZE_MB = 10
+CONVERSION_TIMEOUT_SECONDS = 30
 
 app = FastAPI(
     title="VTracer API",
     description="Convert raster images to SVG using VTracer",
-    version="1.0.0"
+    version="1.0.1"
 )
 
 # Set CORS middleware
@@ -62,12 +75,15 @@ async def convert_image(
             detail=f"Invalid file type: {image.content_type}. Allowed types: {allowed_types}"
         )
     
-    # Check file size (40MB limit)
+    # Check file size (10MB limit)
     image_bytes = await image.read()
-    if len(image_bytes) > 40 * 1024 * 1024:
+    file_size_mb = len(image_bytes) / (1024 * 1024)
+    
+    if len(image_bytes) > MAX_FILE_SIZE_MB * 1024 * 1024:
+        logger.warning(f"File too large rejected: {image.filename}, size: {file_size_mb:.2f}MB")
         raise HTTPException(
             status_code=400,
-            detail="File too large. Maximum 40MB supported."
+            detail=f"File too large. Maximum {MAX_FILE_SIZE_MB}MB supported. Your file: {file_size_mb:.2f}MB"
         )
     
     try:
@@ -91,26 +107,51 @@ async def convert_image(
                 }
                     
             except json.JSONDecodeError:
-                logger.warning("Invalid JSON in options parameter")
+                logger.warning(f"Invalid JSON in options parameter for {image.filename}")
         
-        logger.info(f"Converting image: {image.filename}, size: {len(image_bytes)} bytes")
+        logger.info(f"Starting conversion: {image.filename}, size: {file_size_mb:.2f}MB, content_type: {image.content_type}")
         
-        # Convert using vtracer
-        svg_bytes = vtracer.convert_raw_image_to_svg(image_bytes, **vtracer_options)
+        # Convert using vtracer with timeout
+        loop = asyncio.get_event_loop()
+        try:
+            svg_bytes = await asyncio.wait_for(
+                loop.run_in_executor(
+                    executor,
+                    lambda: vtracer.convert_raw_image_to_svg(image_bytes, **vtracer_options)
+                ),
+                timeout=CONVERSION_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Conversion timeout after {CONVERSION_TIMEOUT_SECONDS}s: {image.filename}, size: {file_size_mb:.2f}MB")
+            raise HTTPException(
+                status_code=504,
+                detail=f"Conversion timeout. Image may be too complex. Try a smaller or simpler image."
+            )
         
-        logger.info(f"Conversion successful, SVG size: {len(svg_bytes)} bytes")
+        logger.info(f"Conversion successful: {image.filename}, input: {file_size_mb:.2f}MB, output: {len(svg_bytes)} bytes")
         
         # Return SVG response
         return Response(
-            content=svg_bytes, 
+            content=svg_bytes,
             media_type="image/svg+xml",
             headers={
                 "Content-Disposition": f"attachment; filename={image.filename.rsplit('.', 1)[0]}.svg"
             }
         )
+    
+    except HTTPException:
+        # Re-raise HTTP exceptions (like timeout) without wrapping
+        raise
         
     except Exception as e:
-        logger.error(f"Conversion failed: {str(e)}")
+        # Log detailed error information
+        logger.error(
+            f"Conversion failed: {image.filename}, "
+            f"size: {file_size_mb:.2f}MB, "
+            f"content_type: {image.content_type}, "
+            f"error: {str(e)}"
+        )
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
             detail=f"Conversion failed: {str(e)}"
