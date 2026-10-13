@@ -1,7 +1,7 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import vtracer
+from converter_worker import convert_in_child
 import json
 import logging
 from typing import Optional
@@ -27,10 +27,10 @@ POLL_INTERVAL_SECONDS = 0.05
 # Each conversion runs in its own process so it can be killed on timeout or when the
 # client goes away. A thread cannot be stopped: timed-out and abandoned conversions used
 # to keep burning CPU and a pool slot until vtracer finished on its own.
-# fork is cheap here (vtracer is already imported) and is the Linux default on 3.12.
-mp_context = multiprocessing.get_context(
-    "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
-)
+# forkserver forks children from a clean single-threaded server that has vtracer
+# preloaded: as cheap as fork, without forking this (possibly multi-threaded) process.
+mp_context = multiprocessing.get_context("forkserver")
+mp_context.set_forkserver_preload(["converter_worker"])
 conversion_slots = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
 
 # vtracer silently treats unknown color modes as "color"
@@ -39,15 +39,6 @@ COLOR_MODE_ALIASES = {"bw": "binary"}
 
 class ClientDisconnected(Exception):
     pass
-
-
-def _convert_in_child(conn, image_bytes, vtracer_options):
-    try:
-        conn.send(("ok", vtracer.convert_raw_image_to_svg(image_bytes, **vtracer_options)))
-    except Exception as e:
-        conn.send(("error", f"{e}\n{traceback.format_exc()}"))
-    finally:
-        conn.close()
 
 
 async def _acquire_slot(request: Request):
@@ -66,7 +57,7 @@ async def run_conversion(request: Request, image_bytes: bytes, vtracer_options: 
     await _acquire_slot(request)
     parent_conn, child_conn = mp_context.Pipe(duplex=False)
     process = mp_context.Process(
-        target=_convert_in_child, args=(child_conn, image_bytes, vtracer_options), daemon=True
+        target=convert_in_child, args=(child_conn, image_bytes, vtracer_options), daemon=True
     )
     try:
         process.start()
