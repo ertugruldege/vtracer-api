@@ -95,6 +95,8 @@ uvicorn main:app --host 0.0.0.0 --port 8080 --reload
 
 - `PORT`: Server port (default: 8080)
 - `PYTHONUNBUFFERED`: Set to "1" for proper logging
+- `CONVERSION_TIMEOUT_SECONDS`: Max time per conversion before it is killed and a 504 is returned (default: 30)
+- `MAX_CONCURRENT_CONVERSIONS`: Conversions running at once; further requests wait for a slot (default: 4)
 
 ## Technical Notes
 
@@ -104,4 +106,6 @@ uvicorn main:app --host 0.0.0.0 --port 8080 --reload
 - Comprehensive error handling
 - CORS enabled for web integration
 - Async/await support
+- Each conversion runs in its own process, killed on timeout or when the client disconnects, so abandoned work never keeps using CPU
+- `color_mode: "bw"` is accepted as an alias of `"binary"`
 - Based on official VTracer documentation from [PyPI](https://pypi.org/project/vtracer/)

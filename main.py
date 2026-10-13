@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import vtracer
@@ -7,7 +7,8 @@ import logging
 from typing import Optional
 import os
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+import time
 import traceback
 
 # Configure logging
@@ -17,17 +18,93 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Thread pool for vtracer conversion (CPU-bound operation)
-executor = ThreadPoolExecutor(max_workers=4)
-
 # Configuration
 MAX_FILE_SIZE_MB = 10
-CONVERSION_TIMEOUT_SECONDS = 30
+CONVERSION_TIMEOUT_SECONDS = float(os.getenv("CONVERSION_TIMEOUT_SECONDS", 30))
+MAX_CONCURRENT_CONVERSIONS = int(os.getenv("MAX_CONCURRENT_CONVERSIONS", 4))
+POLL_INTERVAL_SECONDS = 0.05
+
+# Each conversion runs in its own process so it can be killed on timeout or when the
+# client goes away. A thread cannot be stopped: timed-out and abandoned conversions used
+# to keep burning CPU and a pool slot until vtracer finished on its own.
+# fork is cheap here (vtracer is already imported) and is the Linux default on 3.12.
+mp_context = multiprocessing.get_context(
+    "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
+)
+conversion_slots = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
+
+# vtracer silently treats unknown color modes as "color"
+COLOR_MODE_ALIASES = {"bw": "binary"}
+
+
+class ClientDisconnected(Exception):
+    pass
+
+
+def _convert_in_child(conn, image_bytes, vtracer_options):
+    try:
+        conn.send(("ok", vtracer.convert_raw_image_to_svg(image_bytes, **vtracer_options)))
+    except Exception as e:
+        conn.send(("error", f"{e}\n{traceback.format_exc()}"))
+    finally:
+        conn.close()
+
+
+async def _acquire_slot(request: Request):
+    """Waits for a free conversion slot, giving up if the client leaves meanwhile."""
+    while True:
+        try:
+            await asyncio.wait_for(conversion_slots.acquire(), timeout=0.25)
+            return
+        except asyncio.TimeoutError:
+            if await request.is_disconnected():
+                raise ClientDisconnected()
+
+
+async def run_conversion(request: Request, image_bytes: bytes, vtracer_options: dict) -> str:
+    """Runs vtracer in a child process, killing it on timeout or client disconnect."""
+    await _acquire_slot(request)
+    parent_conn, child_conn = mp_context.Pipe(duplex=False)
+    process = mp_context.Process(
+        target=_convert_in_child, args=(child_conn, image_bytes, vtracer_options), daemon=True
+    )
+    try:
+        process.start()
+        child_conn.close()
+        started = time.monotonic()
+    except Exception:
+        parent_conn.close()
+        child_conn.close()
+        conversion_slots.release()
+        raise
+
+    try:
+
+        while True:
+            # Read as soon as data arrives: the child blocks on send until the pipe drains
+            if parent_conn.poll():
+                status, payload = parent_conn.recv()
+                if status == "error":
+                    raise RuntimeError(payload)
+                return payload
+            if not process.is_alive():
+                raise RuntimeError(f"Converter process exited unexpectedly (code {process.exitcode})")
+            if time.monotonic() - started > CONVERSION_TIMEOUT_SECONDS:
+                raise asyncio.TimeoutError()
+            if await request.is_disconnected():
+                raise ClientDisconnected()
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+    finally:
+        if process.is_alive():
+            process.kill()
+        process.join(timeout=1)
+        parent_conn.close()
+        conversion_slots.release()
 
 app = FastAPI(
     title="VTracer API",
     description="Convert raster images to SVG using VTracer",
-    version="1.0.1"
+    version="1.0.2"
 )
 
 # Set CORS middleware
@@ -58,6 +135,7 @@ async def health():
 
 @app.post("/api/convert")
 async def convert_image(
+    request: Request,
     image: UploadFile = File(...),
     options: Optional[str] = Form(None)
 ):
@@ -92,8 +170,9 @@ async def convert_image(
         if options:
             try:
                 options_dict = json.loads(options)
+                color_mode = options_dict.get("color_mode", "color")
                 vtracer_options = {
-                    "colormode": options_dict.get("color_mode", "color"),
+                    "colormode": COLOR_MODE_ALIASES.get(color_mode, color_mode),
                     "hierarchical": options_dict.get("hierarchical", "stacked"),
                     "mode": options_dict.get("mode", "spline"),
                     "filter_speckle": options_dict.get("filter_speckle", 4),
@@ -111,16 +190,12 @@ async def convert_image(
         
         logger.info(f"Starting conversion: {image.filename}, size: {file_size_mb:.2f}MB, content_type: {image.content_type}")
         
-        # Convert using vtracer with timeout
-        loop = asyncio.get_event_loop()
         try:
-            svg_bytes = await asyncio.wait_for(
-                loop.run_in_executor(
-                    executor,
-                    lambda: vtracer.convert_raw_image_to_svg(image_bytes, **vtracer_options)
-                ),
-                timeout=CONVERSION_TIMEOUT_SECONDS
-            )
+            svg_bytes = await run_conversion(request, image_bytes, vtracer_options)
+        except ClientDisconnected:
+            logger.info(f"Client disconnected, conversion cancelled: {image.filename}")
+            # 499 (nginx's "client closed request"); nobody is left to read it
+            return Response(status_code=499)
         except asyncio.TimeoutError:
             logger.error(f"Conversion timeout after {CONVERSION_TIMEOUT_SECONDS}s: {image.filename}, size: {file_size_mb:.2f}MB")
             raise HTTPException(
