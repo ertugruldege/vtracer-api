@@ -38,11 +38,9 @@ conversion_slots = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
 COLOR_MODE_ALIASES = {"bw": "binary"}
 
 # Shared-secret auth for /api/convert, sent as "X-Api-Token" or "Authorization: Bearer".
-# API_TOKENS takes a comma-separated list so a token can be rotated without downtime.
-# Rollout: set API_TOKENS with API_TOKEN_REQUIRED unset to log callers that do not send
-# a token yet, then set API_TOKEN_REQUIRED=true to reject them with 401.
+# Once API_TOKENS is set, requests without a valid token get 401. It takes a
+# comma-separated list so a token can be rotated without downtime.
 API_TOKENS = [t.strip() for t in os.getenv("API_TOKENS", "").split(",") if t.strip()]
-API_TOKEN_REQUIRED = os.getenv("API_TOKEN_REQUIRED", "").lower() in ("1", "true", "yes")
 PROTECTED_PATHS = {"/api/convert"}
 # The website calls this API server-side, so browsers need no CORS access by default
 CORS_ALLOW_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if o.strip()]
@@ -118,7 +116,7 @@ async def run_conversion(request: Request, image_bytes: bytes, vtracer_options: 
 app = FastAPI(
     title="VTracer API",
     description="Convert raster images to SVG using VTracer",
-    version="1.1.0"
+    version="1.2.0"
 )
 
 # Set CORS middleware
@@ -153,15 +151,13 @@ class ApiTokenMiddleware:
             if not _token_is_valid(token):
                 caller = request.headers.get("x-forwarded-for", request.client.host if request.client else "?")
                 reason = "invalid token" if token else "no token"
-                if API_TOKEN_REQUIRED:
-                    logger.warning(f"Rejected {scope['path']}: {reason}, caller={caller}")
-                    response = JSONResponse(status_code=401, content={"detail": "Missing or invalid API token"})
-                    await response(scope, receive, send)
-                    return
                 logger.warning(
-                    f"Unauthenticated {scope['path']} allowed (API_TOKEN_REQUIRED is off): {reason}, "
-                    f"caller={caller}, user_agent={request.headers.get('user-agent', '?')}"
+                    f"Rejected {scope['path']}: {reason}, caller={caller}, "
+                    f"user_agent={request.headers.get('user-agent', '?')}"
                 )
+                response = JSONResponse(status_code=401, content={"detail": "Missing or invalid API token"})
+                await response(scope, receive, send)
+                return
         await self.app(scope, receive, send)
 
 

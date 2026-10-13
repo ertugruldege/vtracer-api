@@ -97,8 +97,7 @@ uvicorn main:app --host 0.0.0.0 --port 8080 --reload
 - `PYTHONUNBUFFERED`: Set to "1" for proper logging
 - `CONVERSION_TIMEOUT_SECONDS`: Max time per conversion before it is killed and a 504 is returned (default: 30)
 - `MAX_CONCURRENT_CONVERSIONS`: Conversions running at once; further requests wait for a slot (default: 4)
-- `API_TOKENS`: Comma-separated tokens accepted on `/api/convert`, sent as `X-Api-Token: <token>` or `Authorization: Bearer <token>`. Unset means no auth. Several tokens allow rotation without downtime.
-- `API_TOKEN_REQUIRED`: `true` rejects requests without a valid token with 401. While unset, such requests are still served but logged with their caller, to find clients that need the token before enforcing it.
+- `API_TOKENS`: Comma-separated tokens required on `/api/convert`, sent as `X-Api-Token: <token>` or `Authorization: Bearer <token>`; anything else gets 401 (logged with the caller). Unset means no auth. Several tokens allow rotation without downtime.
 - `CORS_ALLOW_ORIGINS`: Comma-separated origins allowed to call the API from a browser (default: `*`)
 
 ## Technical Notes
