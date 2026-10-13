@@ -7,6 +7,7 @@ import logging
 from typing import Optional
 import os
 import asyncio
+import hmac
 import multiprocessing
 import time
 import traceback
@@ -35,6 +36,28 @@ conversion_slots = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
 
 # vtracer silently treats unknown color modes as "color"
 COLOR_MODE_ALIASES = {"bw": "binary"}
+
+# Shared-secret auth for /api/convert, sent as "X-Api-Token" or "Authorization: Bearer".
+# API_TOKENS takes a comma-separated list so a token can be rotated without downtime.
+# Rollout: set API_TOKENS with API_TOKEN_REQUIRED unset to log callers that do not send
+# a token yet, then set API_TOKEN_REQUIRED=true to reject them with 401.
+API_TOKENS = [t.strip() for t in os.getenv("API_TOKENS", "").split(",") if t.strip()]
+API_TOKEN_REQUIRED = os.getenv("API_TOKEN_REQUIRED", "").lower() in ("1", "true", "yes")
+PROTECTED_PATHS = {"/api/convert"}
+# The website calls this API server-side, so browsers need no CORS access by default
+CORS_ALLOW_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if o.strip()]
+
+
+def _presented_token(request: Request) -> Optional[str]:
+    token = request.headers.get("x-api-token")
+    if token:
+        return token
+    auth = request.headers.get("authorization", "")
+    return auth[7:] if auth.lower().startswith("bearer ") else None
+
+
+def _token_is_valid(token: Optional[str]) -> bool:
+    return bool(token) and any(hmac.compare_digest(token, valid) for valid in API_TOKENS)
 
 
 class ClientDisconnected(Exception):
@@ -95,17 +118,54 @@ async def run_conversion(request: Request, image_bytes: bytes, vtracer_options: 
 app = FastAPI(
     title="VTracer API",
     description="Convert raster images to SVG using VTracer",
-    version="1.0.2"
+    version="1.1.0"
 )
 
 # Set CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for production
-    allow_credentials=True,
+    allow_origins=CORS_ALLOW_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class ApiTokenMiddleware:
+    """Checks the token before the upload body is read, so rejected callers cost nothing.
+
+    Plain ASGI rather than @app.middleware("http"): Starlette's BaseHTTPMiddleware wraps
+    the receive channel, which breaks request.is_disconnected() that run_conversion
+    relies on to kill abandoned conversions.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope["type"] == "http"
+            and API_TOKENS
+            and scope["path"] in PROTECTED_PATHS
+            and scope["method"] != "OPTIONS"
+        ):
+            request = Request(scope)
+            token = _presented_token(request)
+            if not _token_is_valid(token):
+                caller = request.headers.get("x-forwarded-for", request.client.host if request.client else "?")
+                reason = "invalid token" if token else "no token"
+                if API_TOKEN_REQUIRED:
+                    logger.warning(f"Rejected {scope['path']}: {reason}, caller={caller}")
+                    response = JSONResponse(status_code=401, content={"detail": "Missing or invalid API token"})
+                    await response(scope, receive, send)
+                    return
+                logger.warning(
+                    f"Unauthenticated {scope['path']} allowed (API_TOKEN_REQUIRED is off): {reason}, "
+                    f"caller={caller}, user_agent={request.headers.get('user-agent', '?')}"
+                )
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(ApiTokenMiddleware)
 
 @app.get("/")
 async def root():
