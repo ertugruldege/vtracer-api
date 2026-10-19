@@ -62,6 +62,10 @@ class ClientDisconnected(Exception):
     pass
 
 
+class UnprocessableImage(Exception):
+    """vtracer cannot trace this image (it panics, e.g. on blank or fully transparent ones)."""
+
+
 async def _acquire_slot(request: Request):
     """Waits for a free conversion slot, giving up if the client leaves meanwhile."""
     while True:
@@ -95,7 +99,13 @@ async def run_conversion(request: Request, image_bytes: bytes, vtracer_options: 
         while True:
             # Read as soon as data arrives: the child blocks on send until the pipe drains
             if parent_conn.poll():
-                status, payload = parent_conn.recv()
+                try:
+                    status, payload = parent_conn.recv()
+                except EOFError:
+                    # poll() also reports a closed pipe: the child died without answering
+                    raise RuntimeError(f"Converter process exited unexpectedly (code {process.exitcode})")
+                if status == "unprocessable":
+                    raise UnprocessableImage(payload)
                 if status == "error":
                     raise RuntimeError(payload)
                 return payload
@@ -243,6 +253,12 @@ async def convert_image(
             logger.info(f"Client disconnected, conversion cancelled: {image.filename}")
             # 499 (nginx's "client closed request"); nobody is left to read it
             return Response(status_code=499)
+        except UnprocessableImage as e:
+            logger.warning(f"Image cannot be traced: {image.filename}, size: {file_size_mb:.2f}MB, reason: {e}")
+            raise HTTPException(
+                status_code=422,
+                detail="This image cannot be traced. It may be blank or fully transparent."
+            )
         except asyncio.TimeoutError:
             logger.error(f"Conversion timeout after {CONVERSION_TIMEOUT_SECONDS}s: {image.filename}, size: {file_size_mb:.2f}MB")
             raise HTTPException(
